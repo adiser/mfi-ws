@@ -1,95 +1,144 @@
-# VSCode ROS2 Workspace Template
+# MFI AMR Waorkspace Setup and Usage
 
-This template will get you set up using ROS2 with VSCode as your IDE.
+> **Note:** Before you begin, verify that you have sufficient storage space available on your device (At least **30 GB**).
+>
+> On Jetson Xavier platforms, an external drive is **required** to have enough storage space.
+Follow the instructions in [Jetson Xavier AGX SD card Setup](#jetson-xavier-agx-sd-card-setup) to configure the storage
+## Setup
 
-See [how I develop with vscode and ros2](https://www.allisonthackston.com/articles/vscode_docker_ros2.html) for a more in-depth look on how to use this workspace.
+1. Configure `nvidia-container-runtime` as the default runtime for Docker.
 
-## Features
+   Using your text editor of choice, add the following items to `/etc/docker/daemon.json`.
+c
+    ```json
+    {
+        ...
+        "runtimes": {
+            "nvidia": {
+                "path": "nvidia-container-runtime",
+                "runtimeArgs": []
+            }
+        },
+        "default-runtime": "nvidia"
+        ...
+    }
+    ```
 
-### Style
+2. Then, restart Docker:
 
-ROS2-approved formatters are included in the IDE.  
+   ```bash
+   sudo systemctl daemon-reload && sudo systemctl restart docker
+   ```
 
-* **c++** uncrustify; config from `ament_uncrustify`
-* **python** autopep8; vscode settings consistent with the [style guide](https://index.ros.org/doc/ros2/Contributing/Code-Style-Language-Versions/)
+3. Install [Git LFS](https://git-lfs.github.com/) in order to pull down all large files:  
 
-### Tasks
+    ```bash
+    sudo apt-get install git-lfs
+    ```  
 
-There are many pre-defined tasks, see [`.vscode/tasks.json`](.vscode/tasks.json) for a complete listing.  Feel free to adjust them to suit your needs.  
+    ```bash
+    git lfs install
+    ```
 
-Take a look at [how I develop using tasks](https://www.allisonthackston.com/articles/vscode_tasks.html) for an idea on how I use tasks in my development.
+4. Navigate to `src` 
+   > **Note:** Remember to replace <path-to-mfi_ws> with the correct path in the following command.
+    ```bash
+    cd <path-to-mfi_ws>/src
+    ``` 
+5. Install [vcstool](https://github.com/dirk-thomas/vcstool) -
+   ```bash 
+   curl -s https://packagecloud.io/install/repositories/dirk-thomas/vcstool/script.deb.sh | sudo bash
+   sudo apt-get update
+   sudo apt-get install python3-vcstool
+   ```
+5. Clone all required repos using `vcstool`- 
+   1. isaac_ros_common
+   2. realsense (4.51.1)
+   ```bash 
+   vcs import < ros2.repos
+   ```
 
-### Debugging
+7. Clone the `librealsense` repo setup udev rules. Remove any connected relasense cameras when prompted:
+   ```bash
+    cd /tmp && \
+    git clone https://github.com/IntelRealSense/librealsense && \
+    cd librealsense
+    ``` 
+    ```bash 
+    sudo ./scripts/setup_udev_rules.sh
+    ```
 
-This template sets up debugging for python files and gdb for cpp programs.  See [`.vscode/launch.json`](.vscode/launch.json) for configuration details.
+9. Configure the container created by `isaac_ros_common/scripts/run_dev.sh` to include `librealsense`. Create the `.isaac_ros_common-config` file in the `isaac_ros_common/scripts` directory:
+    > **Note:** Remember to replace the **two** instances of <path-to-mfi_ws> with the correct path in the following command.
+    ```bash
+    cd <path-to-mfi_ws>/src/isaac_ros_common/scripts && \
+    touch .isaac_ros_common-config && \
+    echo CONFIG_IMAGE_KEY=foxy.realsense_custom.mfi_amr > .isaac_ros_common-config && \
+    echo CONFIG_DOCKER_SEARCH_DIRS="(<path-to-mfi_ws>/docker)" >> .isaac_ros_common-config
+    ```
 
-### Continuous Integration
+10. Create alias to launch the docker container
+   > **Note:** Remember to replace the **two** instances of <path-to-mfi_ws> with the correct path.
+   
+   Edit the `/etc/bash.bashrc` file using `sudo nano /etc/bash.bashrc` and add an entry as follows - .
+   ```bash
+      alias ros2_foxy_docker="cd <path-to-mfi_ws>/src/isaac_ros_common && ./scripts/run_dev.sh <path-to-mfi_ws>"
+   ```
+## Launching ROS
+> Note: Plug in your realsense camera before launching the docker container.
+> 
+11. Launch the Docker container using the `run_dev.sh` script:
 
-The template also comes with basic continuous integration set up. See [`.github/workflows/ros.yaml`](/.github/workflows/ros.yaml).
+   ```bash
+   ros2_foxy_docker
+   ```
+## Building workspace/packages
+12. Build workspace using `colcon build`
+   ```bash
+   colcon build --symlink-install --packages-select-regex realsense2 velodyne
+   ``` 
+   ```bash
+   source install/setup.bash
+   ```
+## Testing Installation
+13. Testing realsense installation:
 
-To remove a linter just delete it's name from this line:
+   ```bash
+   ros2 launch realsense2_camera rs_launch.py
+   ```
+## Jetson Xavier AGX SD card Setup
+To automount the SD card, an entry with a reference to the device path or UUID of the device has to be added in fstab ( File System Table ) file.
 
-```yaml
-      matrix:
-          linter: [cppcheck, cpplint, uncrustify, lint_cmake, xmllint, flake8, pep257]
-```
+Run this command to identify the attached device and note its UUID.
+   ```bash
+   sudo blkid
+   ```
+Edit the fstab file by executing the following command in the terminal. Add an entry similar to the one below after changing the UUID.
+   ```bash
+   sudo nano /etc/fstab
+   ```
+   ```
+   UUID=<put-UUID-here> /mnt  ext4    defaults    0   0
+   ```
 
-## How to use this template
+# Development Workflow  
+## Using open-source ROS2 packages
+If you require installing any packages add them to the Dockerfile.
+If you require building them then add them to ros2.repos and use `vcstool` to manage them 
+## Updating Docker
+- Every time we execute the `ros2_foxy_docker`, it will automatically build the Docker image if any modifications are detected in the dockerfile.
+- If there is a need to install external dependencies, by adding those to the Dockerfile (docker/Dockerfile.mfi_amr) and pushing the updates to github, we can ensure that these dependencies are accessible to all development environments.
+- You can follow the template present in Dockerfile as a starting point to add any dependencies.
+## Git workflow 
+We can use tree types of branches - master, devel, feat, hotfix as follows ([Reference](https://www.atlassian.com/git/tutorials/comparing-workflows/gitflow-workflow))
+- A `devel` branch is created from `master` 
+- `feat` branches are created from `devel` 
+- When a `feat` is complete it is merged into the `devel` branch 
+- After milestone demonstrations,`devel` is merged into `master` 
+- If an issue in `master` is detected a `hotfix` branch is created from `master` 
+- Once the `hotfix` is complete it is merged to both `devel` and `master`
 
-### Prerequisites
-
-You should already have Docker and VSCode with the remote containers plugin installed on your system.
-
-* [docker](https://docs.docker.com/engine/install/)
-* [vscode](https://code.visualstudio.com/)
-* [vscode remote containers plugin](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-
-### Get the template
-
-Click on "use this template"
-
-![template_use](https://user-images.githubusercontent.com/6098197/91331899-43f23b80-e780-11ea-92c8-b4665ce126f1.png)
-
-### Create your repository
-
-On the next dialog, name the repository you would like to start and decide if you want all of the branches, or just the latest LTS: Foxy.
-
-![template_new](https://user-images.githubusercontent.com/6098197/91332035-713ee980-e780-11ea-81d3-13b170f568b0.png)
-
-Github will then create a new repository with the contents of this one in your account.  It grabs the latest changes as "initial commit".
-
-### Clone your repo
-
-Now you can clone your repo as normal
-
-![template_download](https://user-images.githubusercontent.com/6098197/91332342-e4e0f680-e780-11ea-9525-49b0afa0e4bb.png)
-
-### Open it in vscode
-
-Now that you've cloned your repo onto your computer, you can open it in VSCode (File->Open Folder). 
-
-When you open it for the first time, you should see a little popup that asks you if you would like to open it in a container.  Say yes!
-
-![template_vscode](https://user-images.githubusercontent.com/6098197/91332551-36898100-e781-11ea-9080-729964373719.png)
-
-If you don't see the pop-up, click on the little green square in the bottom left corner, which should bring up the container dialog
-
-![template_vscode_bottom](https://user-images.githubusercontent.com/6098197/91332638-5d47b780-e781-11ea-9fb6-4d134dbfc464.png)
-
-In the dialog, select "Remote Containers: Reopen in container"
-
-VSCode will build the dockerfile inside of `.devcontainer` for you.  If you open a terminal inside VSCode (Terminal->New Terminal), you should see that your username has been changed to `ros`, and the bottom left green corner should say "Dev Container"
-
-![template_container](https://user-images.githubusercontent.com/6098197/91332895-adbf1500-e781-11ea-8afc-7a22a5340d4a.png)
-
-
-### Update the template with your code
-
-1. Specify the repositories you want to include in your workspace in `src/ros2.repos` or delete `src/ros2.repos` and develop directly within the workspace.
-2. If you are using a `ros2.repos` file, import the contents `Terminal->Run Task..->import from workspace file`
-2. Install dependencies `Terminal->Run Task..->install dependencies`
-3. (optional) Adjust scripts to your liking.  These scripts are used both within tasks and CI.
-   1. `setup.sh` The setup commands for your code.  Default to import workspace and install dependencies.
-   2. `build.sh` The build commands for your code.  Default to `--merge-install` and `--symlink-install`
-   3. `test.sh` The test commands for your code.
-4. Develop!
+Good practices related to commits - 
+- Include the ROS2 package names in the commit message e.g. "[mapping] some change"
+- If possible, include only changes to a single package in a commit
+- Break down large changes into smaller commits
